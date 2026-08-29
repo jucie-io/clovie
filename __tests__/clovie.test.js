@@ -5,7 +5,6 @@ import { normalizeToFactories } from '../lib/utils/normalizeToFactories.js';
 import { resolveRoutes } from '../lib/utils/viewsToRoutes.js';
 import { defineRoutes as defineServerRoutes } from '@jucie.io/engine-server';
 import { defineHooks } from '../lib/factories/hooks.js';
-import { defineMiddleware } from '../lib/factories/middleware.js';
 import path from 'path';
 
 const pause = async (ms = 10) => new Promise(resolve => setTimeout(resolve, ms));
@@ -133,21 +132,19 @@ describe('Factory Resolution', () => {
     await pause(50);
 
     const opts = clovie.configurator.opts;
-    opts.api = resolveRoutes(opts.api);
-    opts.routes = resolveRoutes(opts.routes);
+    const resolvedApi = resolveRoutes(opts.api);
+    const resolvedRoutes = resolveRoutes(opts.routes);
 
-    expect(Array.isArray(opts.api)).toBe(true);
-    expect(opts.api.length).toBe(3);
-    expect(opts.api.every(r => typeof r === 'object' && typeof r.handler === 'function')).toBe(true);
+    expect(Array.isArray(resolvedApi)).toBe(true);
+    expect(resolvedApi.length).toBe(3);
+    expect(resolvedApi.every(r => typeof r === 'object' && typeof r.handler === 'function')).toBe(true);
 
-    const paths = opts.api.map(r => r.path);
+    const paths = resolvedApi.map(r => r.path);
     expect(paths).toContain('/api/raw');
     expect(paths).toContain('/api/from-factory');
     expect(paths).toContain('/api/from-extra-factory');
 
-    const factories = normalizeToFactories(opts.api, defineServerRoutes);
-    clovie.server.use(...factories);
-    await clovie.server.listen({ ...opts, port: 0, open: false });
+    await clovie.server.listen({ port: 0, open: false });
 
     const address = clovie.server.getHttpServer().address();
     const base = `http://localhost:${address.port}`;
@@ -172,17 +169,13 @@ describe('Factory Resolution', () => {
     await pause(50);
 
     const opts = clovie.configurator.opts;
-    opts.api = resolveRoutes(opts.api);
+    const resolvedApi = resolveRoutes(opts.api);
 
-    expect(opts.api.every(r => typeof r !== 'function')).toBe(true);
+    expect(resolvedApi.every(r => typeof r !== 'function')).toBe(true);
 
-    const singleRoutes = [
-      { method: 'GET', path: '/api/single', handler: (ctx) => ctx.respond.json({ source: 'single' }) },
-    ];
-
-    const factories = normalizeToFactories([...opts.api, ...singleRoutes], defineServerRoutes);
-    clovie.server.use(...factories);
-    await clovie.server.listen({ ...opts, port: 0, open: false });
+    // /api/single is not in config — add it programmatically
+    clovie.server.route('GET', '/api/single', (ctx) => ctx.respond.json({ source: 'single' }));
+    await clovie.server.listen({ port: 0, open: false });
 
     const address = clovie.server.getHttpServer().address();
     const res = await fetch(`http://localhost:${address.port}/api/single`);
@@ -196,12 +189,8 @@ describe('Factory Resolution', () => {
     });
     await pause(50);
 
-    const opts = clovie.configurator.opts;
-    opts.api = resolveRoutes(opts.api);
-    const hookFactories = normalizeToFactories(opts.hooks, defineHooks);
-    const apiFactories = normalizeToFactories(opts.api, defineServerRoutes);
-    clovie.server.use(...hookFactories, ...apiFactories);
-    await clovie.server.listen({ ...opts, port: 0, open: false });
+    // hooks and api are both in config — listen() processes them automatically
+    await clovie.server.listen({ port: 0, open: false });
 
     expect(globalThis.__test_hooks_factory_called).toBe(true);
 
@@ -217,16 +206,11 @@ describe('Factory Resolution', () => {
     });
     await pause(50);
 
-    const opts = clovie.configurator.opts;
-    opts.api = resolveRoutes(opts.api);
     globalThis.__test_raw_hook_called = false;
 
-    const hookFactories = normalizeToFactories({
-      onRequest: () => { globalThis.__test_raw_hook_called = true; },
-    }, defineHooks);
-    const apiFactories = normalizeToFactories(opts.api, defineServerRoutes);
-    clovie.server.use(...hookFactories, ...apiFactories);
-    await clovie.server.listen({ ...opts, port: 0, open: false });
+    // Extra hook not in config — register programmatically via server.hooks()
+    clovie.server.hooks({ onRequest: () => { globalThis.__test_raw_hook_called = true; } });
+    await clovie.server.listen({ port: 0, open: false });
 
     const address = clovie.server.getHttpServer().address();
     await fetch(`http://localhost:${address.port}/api/raw`);
@@ -364,14 +348,8 @@ describe('Route Factory Integration', () => {
     });
     await pause(50);
 
-    const opts = clovie.configurator.opts;
-    const services = { file: clovie.file, liveReload: clovie.liveReload };
-
-    const { pagesToRoutes } = await import('../lib/utils/viewsToRoutes.js');
-    const pageRoutes = pagesToRoutes(resolveRoutes(opts.routes), opts, services);
-    const routeFactories = normalizeToFactories(pageRoutes, defineServerRoutes);
-    clovie.server.use(...routeFactories);
-    await clovie.server.listen({ ...opts, port: 0, open: false });
+    // _viewRoutesFactory in config handles config.routes automatically
+    await clovie.server.listen({ port: 0, open: false });
 
     const address = clovie.server.getHttpServer().address();
     const base = `http://localhost:${address.port}`;
@@ -461,10 +439,7 @@ describe('Middleware', () => {
       });
       await pause(50);
 
-      const opts = clovie.configurator.opts;
-      const apiFactories = normalizeToFactories(opts.api, defineServerRoutes);
-      clovie.server.use(...apiFactories);
-      await clovie.server.listen({ ...opts, port: 0 });
+      await clovie.server.listen({ port: 0, open: false });
 
       const address = clovie.server.getHttpServer().address();
       const res = await fetch(`http://localhost:${address.port}/api/ping`);
@@ -479,10 +454,7 @@ describe('Middleware', () => {
       });
       await pause(50);
 
-      const opts = clovie.configurator.opts;
-      const apiFactories = normalizeToFactories(opts.api, defineServerRoutes);
-      clovie.server.use(...apiFactories);
-      await clovie.server.listen({ ...opts, port: 0 });
+      await clovie.server.listen({ port: 0, open: false });
 
       const address = clovie.server.getHttpServer().address();
       await fetch(`http://localhost:${address.port}/api/ping`);
@@ -496,11 +468,7 @@ describe('Middleware', () => {
       });
       await pause(50);
 
-      const opts = clovie.configurator.opts;
-      const mwFactories = normalizeToFactories(opts.middleware, defineMiddleware);
-      const apiFactories = normalizeToFactories(opts.api, defineServerRoutes);
-      clovie.server.use(...mwFactories, ...apiFactories);
-      await clovie.server.listen({ ...opts, middleware: undefined, port: 0 });
+      await clovie.server.listen({ port: 0, open: false });
 
       const address = clovie.server.getHttpServer().address();
       const res = await fetch(`http://localhost:${address.port}/api/ping`);
