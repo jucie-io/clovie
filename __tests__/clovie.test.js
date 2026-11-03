@@ -73,6 +73,16 @@ describe('Extensibility Hooks', () => {
     expect(clovie.testService).toBeDefined();
   });
 
+  it('should install services that require each other, in any order', async () => {
+    clovie = await createClovie({
+      optsPath: path.resolve(process.cwd(), '__tests__', 'clovie.requires.config.js'),
+    });
+
+    // No pause: createClovie resolves once the services are in.
+    expect(clovie.left.other()).toBe('right');
+    expect(clovie.right.other()).toBe('left');
+  });
+
   it('should call setup(engine) hook during creation', async () => {
     clovie = await createClovie({
       optsPath: path.resolve(process.cwd(), '__tests__', 'clovie.extensibility.config.js'),
