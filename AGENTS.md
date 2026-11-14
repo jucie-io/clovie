@@ -63,6 +63,15 @@ export default {
 
 You can mix raw route objects and factories in the same array.
 
+### Lifecycle hooks
+
+`beforeListen(useContext, opts)` runs before the server listens, and `afterListen(useContext, opts, httpServer)`
+after. On SIGINT, SIGTERM or SIGQUIT, `clovie serve` and `clovie dev` await `beforeStop(useContext, opts)` while
+the server still answers, then close HTTP and exit 0. The whole stop gets `shutdownTimeoutMs` (default 5000);
+past it, or if `beforeStop` throws, the process exits 1. An uncaught exception or unhandled rejection stops the
+same way, and exits 1 however the stop goes. A repeated signal during a stop is ignored. Raise it when `beforeStop` waits on work of its own, and
+give the process manager (Docker's `stop_grace_period`, say) longer still.
+
 ### CLI commands
 
 ```
@@ -218,6 +227,9 @@ describe('Feature', () => {
 Command branching order: `skills` -> `kill` -> `create` -> `command-line-args` main flow.
 
 Main commands: `build` (production, exits after), `serve` (production, stays alive), `dev`/`watch` (development, stays alive).
+
+`serve` and `dev` install the signal handlers before they start, so a signal while they do still runs
+`run.stop()` (`beforeStop`, then the server's stop) under `shutdownTimeoutMs`.
 
 Legacy aliases: `watch` -> `dev`, `server` -> `serve`.
 

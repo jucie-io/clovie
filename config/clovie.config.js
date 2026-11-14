@@ -40,10 +40,16 @@ export default {
   // setup(engine) {},
 
   // Lifecycle — runs right before server.listen()
-  // beforeListen(opts) {},
+  // beforeListen(useContext, opts) {},
 
   // Lifecycle — runs right after server starts (attach WebSocket upgrades, etc.)
-  // afterListen(httpServer, opts) {},
+  // afterListen(useContext, opts, httpServer) {},
+
+  // Lifecycle — on SIGINT/SIGTERM, awaited while the server still answers; then HTTP closes
+  // beforeStop(useContext, opts) {},
+
+  // How long a stop gets, beforeStop included, before the process exits 1 (default 5000)
+  // shutdownTimeoutMs: 5000,
 
   routes: [
     {

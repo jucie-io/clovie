@@ -327,17 +327,16 @@ async function executeCommand(clovie, command, options) {
       
     case 'serve':
       console.log('🌐 Starting production server...');
-      await clovie.run.serve();
-      // Keep process alive for server
+      // Before it starts, so a signal while it does still runs beforeStop rather than ending the process.
       setupGracefulShutdown(clovie);
+      await clovie.run.serve();
       break;
       
     case 'dev':
     case 'watch':
       console.log('🚀 Starting development server...');
-      await clovie.run.dev();
-      // Keep process alive for dev server
       setupGracefulShutdown(clovie);
+      await clovie.run.dev();
       break;
       
     default:
@@ -347,11 +346,16 @@ async function executeCommand(clovie, command, options) {
   }
 }
 
+// How long a stop gets before the process is forced out, unless the config's shutdownTimeoutMs says otherwise.
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5000;
+
 // Setup graceful shutdown handlers
 function setupGracefulShutdown(clovie) {
   let isShuttingDown = false;
   
-  const gracefulShutdown = async (signal) => {
+  // A signal is a stop asked for, and exits 0 if it goes well; a crash (uncaught exception, unhandled
+  // rejection) still stops, so beforeStop runs, but always exits 1.
+  const gracefulShutdown = async (signal, { crashed = false } = {}) => {
     if (isShuttingDown) {
       console.log('⚠️  Shutdown already in progress...');
       return;
@@ -360,24 +364,19 @@ function setupGracefulShutdown(clovie) {
     isShuttingDown = true;
     console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
     
-    // Set a timeout to force exit if shutdown hangs
+    // The config's shutdownTimeoutMs, when it needs longer than the default to stop (its beforeStop
+    // waits on work of its own). Past it, the process exits 1 with whatever is still going.
+    const timeoutMs = clovie.configurator.opts?.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
     const forceExitTimeout = setTimeout(() => {
-      console.log('⚠️  Shutdown timeout - forcing exit');
+      console.log(`⚠️  Shutdown took longer than ${timeoutMs} ms - forcing exit`);
       process.exit(1);
-    }, 5000); // 5 second timeout
+    }, timeoutMs);
     
     try {
-      // Stop server if it's running
-      const server = clovie.server;
-      if (server && server.isRunning && server.isRunning()) {
-        console.log('🔌 Stopping server...');
-        await server.stop();
-        console.log('✅ Server stopped');
-      }
-      
+      await clovie.run.stop();
       clearTimeout(forceExitTimeout);
       console.log('✅ Graceful shutdown complete');
-      process.exit(0);
+      process.exit(crashed ? 1 : 0);
     } catch (error) {
       clearTimeout(forceExitTimeout);
       console.error('❌ Error during shutdown:', error.message);
@@ -385,20 +384,21 @@ function setupGracefulShutdown(clovie) {
     }
   };
   
-  // Handle multiple termination signals (using once to prevent duplicates)
-  process.once('SIGINT', () => gracefulShutdown('SIGINT'));
-  process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
-  process.once('SIGQUIT', () => gracefulShutdown('SIGQUIT'));
+  // Listened to for as long as the process runs: Ctrl-C through `npm run` arrives twice, and the default
+  // action of a second signal would end a stop still under way. Repeats find it in progress and are ignored.
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGQUIT', () => gracefulShutdown('SIGQUIT'));
   
   // Handle uncaught exceptions and unhandled rejections
   process.once('uncaughtException', async (error) => {
     console.error('❌ Uncaught Exception:', error);
-    await gracefulShutdown('uncaughtException');
+    await gracefulShutdown('uncaughtException', { crashed: true });
   });
   
   process.once('unhandledRejection', async (reason, promise) => {
     console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-    await gracefulShutdown('unhandledRejection');
+    await gracefulShutdown('unhandledRejection', { crashed: true });
   });
 }
 
